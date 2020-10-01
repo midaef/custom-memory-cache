@@ -11,6 +11,7 @@ import (
 var (
 	ErrKeyNotFound     = errors.New("custom-memory-cache: Key not found")
 	ErrCacheIsNotAlive = errors.New("custom-memory-cache: Cache is not alive")
+	ErrCacheIsEmpty    = errors.New("custom-memory-cache: Cache is empty")
 )
 
 // Cache ...
@@ -18,18 +19,19 @@ type Cache struct {
 	DataMutex  *sync.Mutex
 	Size       uint16
 	GCInterval time.Duration
-	Data       map[string]*models.Data
+	Data       map[string]models.Data
 }
 
 func NewCache(size uint16, gcInterval time.Duration) *Cache {
-	if gcInterval > 0 {
-
-	}
 	cache := &Cache{
 		DataMutex:  new(sync.Mutex),
-		Data:       make(map[string]*models.Data, size),
+		Data:       make(map[string]models.Data, size),
 		Size:       size,
 		GCInterval: gcInterval,
+	}
+	if gcInterval > 0 {
+		gc := NewGC(cache)
+		gc.Start()
 	}
 	return cache
 }
@@ -40,7 +42,7 @@ func (cache *Cache) Write(key string, value interface{}, lifeTime time.Duration)
 		lfTime = time.Now().Add(lifeTime).UnixNano()
 	}
 	cache.DataMutex.Lock()
-	cache.Data[key] = &models.Data{
+	cache.Data[key] = models.Data{
 		Data:     value,
 		LifeTime: lfTime,
 		Created:  time.Now(),
@@ -62,4 +64,36 @@ func (cache *Cache) Read(key string) (interface{}, error) {
 		}
 	}
 	return data.Data, nil
+}
+
+func (cache *Cache) ReadAll() (map[string]models.Data, error) {
+	cache.DataMutex.Lock()
+	defer cache.DataMutex.Unlock()
+	if cache.Data != nil {
+		return cache.Data, nil
+	}
+	return nil, ErrCacheIsEmpty
+}
+
+func (cache *Cache) Delete(key string) error {
+	cache.DataMutex.Lock()
+	defer cache.DataMutex.Unlock()
+	_, ok := cache.Data[key]
+	if !ok {
+		return ErrKeyNotFound
+	}
+	delete(cache.Data, key)
+	return nil
+}
+
+func (cache *Cache) DeleteAll() error {
+	cache.DataMutex.Lock()
+	defer cache.DataMutex.Unlock()
+	if cache.Data != nil {
+		for key := range cache.Data {
+			delete(cache.Data, key)
+		}
+		return nil
+	}
+	return ErrCacheIsEmpty
 }
